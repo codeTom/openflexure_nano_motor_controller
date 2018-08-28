@@ -15,6 +15,7 @@ import numpy as np
 import sys
 import re
 import warnings
+from scipy.interpolate import interp2d
 
 class OpenFlexureStage(BasicSerialInstrument):
     """Class managing serial communications with an Openflexure Motor Controller
@@ -147,23 +148,40 @@ class OpenFlexureStage(BasicSerialInstrument):
         except:
             self._backlash = np.array([int(blsh)]*self.n_axes, dtype=np.int)
 
-    def move_rel(self, displacement, axis=None, backlash=True):
+    def _convert_move(move,axis):
+        """Helper to convert move from distance, axis to vector
+        """
+        assert axis in self.axis_names, "axis must be one of {}".format(self.axis_names)
+        move = np.zeros(self.n_axes, dtype=np.int)
+        move[np.argmax(np.array(self.axis_names) == axis)] = int(displacement)
+        return move
+
+    def move_rel(self, displacement, axis=None, backlash=True, compensate_z = False):
         """Make a relative move, optionally correcting for backlash.
 
         displacement: integer or array/list of 3 integers
         axis: None (for 3-axis moves) or one of 'x','y','z'
         backlash: (default: True) whether to correct for backlash.
+        compensate_z: (default: False) whether to correct for z motion (must be calibrated before use)
         """
+
+        # life is easier if we're always in 3D
+        if axis is not None:
+            displacement=_convert_move(displacement, axis)
+            axis=None
+
+        #calculate the offset required and add it to the move
+        if compensate_z:
+            if not self._z_compensation_table:
+                print("WARN: No compensation data found, ignoring compensate_z")
+            else:
+                cp=self.position
+                current = self._compensate_z(cp[0],cp[1])
+                future = self._compensate_z(cp[0]+displacement[0],cp[1]+displacement[1])
+                displacement[2]+=future-current
+
         if not backlash or self.backlash is None:
             return self._move_rel_nobacklash(displacement, axis=axis)
-
-        if axis is not None:
-            # backlash correction is easier if we're always in 3D
-            # so this code just converts single-axis moves into all-axis moves.
-            assert axis in self.axis_names, "axis must be one of {}".format(self.axis_names)
-            move = np.zeros(self.n_axes, dtype=np.int)
-            move[np.argmax(np.array(self.axis_names) == axis)] = int(displacement)
-            displacement = move
 
         initial_move = np.array(displacement, dtype=np.int)
         # Backlash Correction
@@ -312,7 +330,17 @@ class OpenFlexureStage(BasicSerialInstrument):
         if hasattr(self, 'light_sensor') and self.light_sensor:
             self.light_sensor.test_mode=value
 
+    _z_compensation_table = False
 
+    @property
+    def z_compensation_table(self):
+        return self._z_compensation_table
+
+
+    @z_compensation_table.setter
+    def z_compensation_table(self, value):
+        self._z_compensation_table = value
+        self._compensate_z = interp2d(value[0],value[1],value[2],kind='cubic')
 
 class LightSensor(OptionalModule):
     """An optional module giving access to the light sensor.
