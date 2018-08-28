@@ -171,15 +171,27 @@ class OpenFlexureStage(BasicSerialInstrument):
             axis=None
 
         #calculate the offset required and add it to the move
-        if compensate_z:
-            if not self._z_compensation_table:
+        if compensate_z and ( displacement[0] != 0 or displacement[1] != 0 ):
+            if self._z_compensation_table is None:
                 print("WARN: No compensation data found, ignoring compensate_z")
             else:
                 cp=self.position
-                current = self._compensate_z(cp[0],cp[1])
-                future = self._compensate_z(cp[0]+displacement[0],cp[1]+displacement[1])
-                displacement[2]+=future-current
-
+                try:
+                    current = self._compensate_z(cp[0],cp[1])[0]
+                    future = self._compensate_z(cp[0]+displacement[0],cp[1]+displacement[1])[0]
+                    assert future > 0 and current > 0 , "Interpolation failed"
+                    print(future)
+                    print(current)
+                    if future-current < 5000:
+                        displacement[2]+=future-current
+                        print("Z corrected by {}".format(future-current))
+                    else:
+                        print("WARN: Z correction failed, offset too large, ignored")
+                except ValueError:
+                    print("WARN: Z compensation failed, out of bounds")
+                except AssertionError:
+                    print("WARN: Z compensation failed, invalid data")
+ 
         if not backlash or self.backlash is None:
             return self._move_rel_nobacklash(displacement, axis=axis)
 
@@ -330,7 +342,7 @@ class OpenFlexureStage(BasicSerialInstrument):
         if hasattr(self, 'light_sensor') and self.light_sensor:
             self.light_sensor.test_mode=value
 
-    _z_compensation_table = False
+    _z_compensation_table = None
 
     @property
     def z_compensation_table(self):
@@ -340,7 +352,8 @@ class OpenFlexureStage(BasicSerialInstrument):
     @z_compensation_table.setter
     def z_compensation_table(self, value):
         self._z_compensation_table = value
-        self._compensate_z = interp2d(value[0],value[1],value[2],kind='cubic')
+        if value is not None and type(value) is np.ndarray:
+            self._compensate_z = interp2d(value[0],value[1],value[2],kind='linear',bounds_error=True)
 
 class LightSensor(OptionalModule):
     """An optional module giving access to the light sensor.
