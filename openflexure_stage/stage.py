@@ -15,6 +15,7 @@ import numpy as np
 import sys
 import re
 import warnings
+from math import sqrt
 from scipy.interpolate import interp2d
 
 class OpenFlexureStage(BasicSerialInstrument):
@@ -191,7 +192,7 @@ class OpenFlexureStage(BasicSerialInstrument):
                     print("WARN: Z compensation failed, out of bounds")
                 except AssertionError:
                     print("WARN: Z compensation failed, invalid data")
- 
+
         if not backlash or self.backlash is None:
             return self._move_rel_nobacklash(displacement, axis=axis)
 
@@ -343,6 +344,7 @@ class OpenFlexureStage(BasicSerialInstrument):
             self.light_sensor.test_mode=value
 
     _z_compensation_table = None
+    z_compensation_method = None
 
     @property
     def z_compensation_table(self):
@@ -355,11 +357,21 @@ class OpenFlexureStage(BasicSerialInstrument):
         if value is not None and type(value) is np.ndarray:
             self._compensate_z = interp2d(value[0],value[1],value[2],kind='linear',bounds_error=True)
 
+    @property
+    def z_compensation_params(self):
+        return self._z_compensation_params
+
+    @z_compensation_params.setter
+    def z_compensation_function(self, args):
+        self._z_compensation_params=args
+        #args are r,x0,y0,z0
+        self.z_compensation_function=lambda x,y:args[3]+sqrt(args[0]**2-(args[1]-x)**2-(args[2]-y)**2)
+
 class LightSensor(OptionalModule):
     """An optional module giving access to the light sensor.
 
     If a light sensor is enabled in the motor controller's firmware, then
-    the :class:`openflexure_stage.OpenFlexureStage` will gain an optional
+    the :class:`openflexure_stage.OpenFlexureStage` willtho gain an optional
     module which is an instance of this class.  It can be used to access
     the light sensor (usually via the I2C bus).
     """
