@@ -344,7 +344,7 @@ class OpenFlexureStage(BasicSerialInstrument):
             self.light_sensor.test_mode=value
 
     _z_compensation_table = None
-    z_compensation_method = None
+    _z_compensation_method = None
 
     @property
     def z_compensation_table(self):
@@ -358,20 +358,33 @@ class OpenFlexureStage(BasicSerialInstrument):
             self._compensate_z = interp2d(value[0],value[1],value[2],kind='linear',bounds_error=True)
 
     @property
-    def z_compensation_params(self):
-        return self._z_compensation_params
+    def z_compensation_method(self):
+        return self._z_compensation_method
 
-    @z_compensation_params.setter
-    def z_compensation_function(self, args):
-        self._z_compensation_params=args
-        #args are r,x0,y0,z0
-        self.z_compensation_function=lambda x,y:args[3]+sqrt(args[0]**2-(args[1]-x)**2-(args[2]-y)**2)
+    @z_compensation_method.setter
+    def z_compensation_method(self, value):
+        self._z_compensation_method=value
+        if value is None:
+            self.z_compensation_function=lambda x: 0
+            return
+        if self._z_compensation_table is not None and type(self._z_compensation_table) is np.ndarray:
+            raise ValueError("Invalid z_compensation_table")
+        if value == "sphere":
+            #args are r,x0,y0,z0
+            z=self.z_compensation_table[:,2]
+            xy=self.z_compensation_table[:,0:2]
+            #TODO: should we keep r fixed?
+            #TODO: check proper shapes (for fitting and _compensate_z in and out)
+            args,covars=scipy.optimize.curve_fit(f,xy,z,p0=[500000,cp[0],cp[1],cp[2]+500000])
+            self._compensate_z=lambda x,y:args[3]+sqrt(args[0]**2-(args[1]-x)**2-(args[2]-y)**2)
+        elif value == "interpolate":
+            self._compensate_z = interp2d(value[0],value[1],value[2],kind='linear',bounds_error=True)
 
 class LightSensor(OptionalModule):
     """An optional module giving access to the light sensor.
 
     If a light sensor is enabled in the motor controller's firmware, then
-    the :class:`openflexure_stage.OpenFlexureStage` willtho gain an optional
+    the :class:`openflexure_stage.OpenFlexureStage` will gain an optional
     module which is an instance of this class.  It can be used to access
     the light sensor (usually via the I2C bus).
     """
